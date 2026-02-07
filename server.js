@@ -15,7 +15,38 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Health check route (root)
+// MongoDB Connection Strategy
+const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+  try {
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log('MongoDB connected successfully');
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    throw err;
+  }
+};
+
+// Trigger initial connection (for warm starts)
+connectDB().catch(err => console.error('Initial connection failed', err));
+
+// Database Connection Middleware
+app.use(async (req, res, next) => {
+  // Skip DB check for health check and preflight
+  if (req.path === '/' || req.method === 'OPTIONS') return next();
+
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    console.error('Database connection failed in middleware');
+    res.status(500).json({ message: 'Database connection failed', error: err.message });
+  }
+});
+
+// Health check route
 app.get('/', (req, res) => {
   res.json({ message: 'Backend API is running!', status: 'ok' });
 });
@@ -24,34 +55,13 @@ app.get('/', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 
-// MongoDB Connection Strategy for Serverless
-let isConnected = false;
-
-const connectDB = async () => {
-  if (isConnected) {
-    console.log('Using existing MongoDB connection');
-    return;
-  }
-  try {
-    const db = await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    isConnected = db.connections[0].readyState;
-    console.log('MongoDB connected successfully');
-  } catch (err) {
-    console.error('MongoDB connection error:', err);
-  }
-};
-
-// Connect to DB immediately
-connectDB();
-
-// For local development
+// Local Start
 const PORT = process.env.PORT || 5000;
 if (process.env.NODE_ENV !== 'production') {
-  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
 }
 
-// Export for Vercel serverless
+// Export app
 module.exports = app;
